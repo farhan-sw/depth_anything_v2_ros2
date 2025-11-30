@@ -18,11 +18,13 @@
 
 
 # Python
+import os
 import time
 import numpy as np
 import torch
 import cv2
 from cv_bridge import CvBridge, CvBridgeError
+from ament_index_python.packages import get_package_share_directory
 
 # ROS 2
 import rclpy
@@ -107,9 +109,9 @@ class DepthAnythingROS(Node):
         # Create common publishers
         sensor_qos_profile = QoSProfile(
             durability=QoSDurabilityPolicy.VOLATILE,
-            reliability=QoSReliabilityPolicy.BEST_EFFORT,
+            reliability=QoSReliabilityPolicy.RELIABLE,
             history=QoSHistoryPolicy.KEEP_LAST,
-            depth=1)
+            depth=10)
         self.depth_image_pub = self.create_publisher(
             Image, self.depth_image_topic, sensor_qos_profile)
 
@@ -140,10 +142,10 @@ class DepthAnythingROS(Node):
             f'The parameter device is set to: [{self.device}]')
 
         self.declare_parameter('model_file', 'depth_anything_v2_vits.pth')
-        self.model_file = self.get_parameter(
-            'model_file').get_parameter_value().string_value
+        requested_model = self.get_parameter('model_file').get_parameter_value().string_value
+        self.model_file = self._resolve_model_path(requested_model)
         self.get_logger().info(
-            f'The parameter model_file is set to: [{self.model_file}]')
+            f'The parameter model_file is set to: [{requested_model}] (resolved to {self.model_file})')
 
         self.declare_parameter('encoder', 'vits')
         self.encoder = self.get_parameter(
@@ -166,7 +168,9 @@ class DepthAnythingROS(Node):
 
         # Only detect object if there's any subscriber
         if self.depth_image_pub.get_subscription_count() == 0:
-            return
+            self.get_logger().debug(
+                'No subscribers detected on depth topic; running inference anyway to keep pipeline warm.'
+            )
 
         self.get_logger().info(
             f'Subscribed to depth image topic: [{self.depth_image_topic}]', once=True)
@@ -198,6 +202,24 @@ class DepthAnythingROS(Node):
             self.depth_image_pub.publish(ros_image)
         except CvBridgeError as e:
             print(e)
+
+
+    def _resolve_model_path(self, configured_value: str) -> str:
+        if configured_value and os.path.isabs(configured_value) and os.path.exists(configured_value):
+            return configured_value
+        search_roots = [
+            os.getcwd(),
+            os.path.join(get_package_share_directory('depth_anything_v2_ros2'), 'models'),
+        ]
+        for root in search_roots:
+            candidate = os.path.join(root, configured_value)
+            if os.path.exists(candidate):
+                return candidate
+        error_msg = (
+            f"DepthAnythingV2 model file '{configured_value}' not found. Checked: {search_roots}."
+        )
+        self.get_logger().error(error_msg)
+        raise FileNotFoundError(error_msg)
 
 
 def main(args=None):
