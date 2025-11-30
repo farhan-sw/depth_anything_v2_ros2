@@ -20,9 +20,9 @@
 # Python
 import os
 import time
-import numpy as np
-import torch
-import cv2
+import numpy as np # type: ignore[import]
+import torch # type: ignore[import]
+import cv2 # type: ignore[import]
 from cv_bridge import CvBridge, CvBridgeError
 from ament_index_python.packages import get_package_share_directory
 
